@@ -16,7 +16,7 @@ import os
 import datetime
 
 sock = socket(AF_INET, SOCK_STREAM)
-sock.bind(('127.0.0.1', 8000))
+sock.bind(('127.0.0.1', 36895))
 sock.listen(0)
 print 'Start server at localhost:8000...\n\n'
 
