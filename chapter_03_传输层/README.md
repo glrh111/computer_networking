@@ -194,6 +194,136 @@ TCP依赖于差错检测、重传、累积确认、定时器、用于序号和�
 TCP被称为是面向连接的 connection-oriented , 这是因为在一个应用进程可以开始向另一个应用进程发送数据之前，
 这两个进程必须先相互握手，即他们必须先发送某些预备报文段，以建立确保数据传输的参数。作为TCP连接建立的一部分，连接的双方都将初始化与TCP连接相关的许多TCP状态变量。
  
+这种TCP连接不是一条像在电路交换网络中的端到端TDM、FDM电路，也不是一条虚电路，因为其两个状态完全保留在端系统中。
+由于TCP协议只在端系统中运行，而不是在中间的网络元素（路由器和链路层交换机）中运行，所以中间的网络元素不会维持TCP连接状态。
+事实上，中间的路由器对TCP完全视而不见，他们看到的是数据报，而不是连接。
+
++ TCP连接提供的是全双工服务 full-duplex service。
++ TCP连接是点对点point-to-point的，即在单个发送方与单个接收方间的连接。
+
+三次握手 three-way handshake
++ 客户发送一个TCP segment
++ 服务器用另一个特殊的TCP segment来响应
++ 客户端再用第三个特殊segment响应
+
+前两个segment不承载有效载荷，不包含应用层数据，第三个segment可以承载有效载荷。
+
+![TCP发送缓存和接收缓存](http://o9hjg7h8u.bkt.clouddn.com/tcp%E5%8F%91%E9%80%81%E7%BC%93%E5%AD%98%E5%92%8C%E6%8E%A5%E6%94%B6%E7%BC%93%E5%AD%98.png)
+
+一旦建立起一条TCP连接，两个应用程序之间就可以相互发送数据了
++ 客户端进程通过socket传递数据流，之后由TCP控制
++ TCP将这些数据引导到该连接的发送缓存send buffer里，三次握手初期设置的缓存之一，接下来TCP就会不时地从其中取出一条数据。
+TCP可从缓存中取出并放入segment中的数据数量受限于MSS Maximum Segment Size最大报文段长度。
+MSS通常根据最初确定的由本地之际发送的最大链路层帧长度，即最大传输单元MTU Maximum Transmission Unit来设置。
+设置该MSS要保证一个TCP segment加上TCP/IP首部长度（通常40bytes）将适合单个链路层帧。以太网和PPP链路层协议都具有1500字节的MTU，
+因此MSS的典型值是1460字节。
+已经提出了多种发现路径MTU的方法，并基于路径MTU（从源到目的地的所有链路上发送的最大链路层帧）设置MSS。
+注意，MSS是segment里应用层数据的最大长度。
++ TCP为每一个segment配上TCP首部，这些segment被下传给网络层，网络层将其分别封装在IP datagram中。
++ 当TCP在另一端接收到一个segment后，该segment的数据就被放入该TCP连接的接收缓存中。应用程序从此缓存中读取数据流。
+
+### 3.5.2 TCP segment 结构
+
+![TCP segment结构](http://o9hjg7h8u.bkt.clouddn.com/TCP_segment%E7%BB%93%E6%9E%84.png)
+
+TCP segment由首部字段和数据字段组成。MSS限制了segment数据字段的最大长度。当TCP发送一个大文件，TCP通常将该文件划分成长度是MSS的若干块，
+最后一块通常小于MSS。交互式应用通常传送长度小于MSS的数据，Telnet通常只有一个字节的数据。
+
+TCP首部一般是20字节。
+
+TCP标志位含义
++ SYN synchronous 建立联机
++ ACK acknowledgement 确认
++ PSH push 传送
++ FIN finish 结束
++ RST reset 重置
++ URG urgent 紧急
+
+#### 1 序号和确认号
+
+TCP把数据看做无结构的、有序的字节流。序号是建立在传送的字节流之上，而不是建立在传送的segment的序列之上。一个segment的编号sequence number for a segment
+因此是该segment首字节的字节流编号（字节的序号）。
+
+![文件数据划分为TCP segment](http://o9hjg7h8u.bkt.clouddn.com/%E6%96%87%E4%BB%B6%E6%95%B0%E6%8D%AE%E5%88%92%E5%88%86%E4%B8%BATCP%20segment.png)
+
+主机A从主机B接收数据之后，所发送的确认号，是主机A期望从主机B收到的下一个字节的序号。
+
+TCP连接的双方，均可以随机地选择初始序号，这样做可以减少将那些仍在网络中存在的两台主机之间先前已终止的连接segment,。。。
+
+### 3.5.3 往返时间的估计与超时
+
+TCP采用超时/重传来处理segment的丢失问题。
+
+#### 1 估计往返时间  page 181
+
+segment的样本RTT，即Sample RTT, 就是从某segment被发出到对该segment的确认被收到之间的时间量。
+S RTT也是变化的，通过以下公式取平均值：EstimatedRTT = (1-alpha) * EstimatedRTT + alpha * SampleRTT.
+
+alpha的一个RFC 6298的建议值是0.125.
+
+RTT偏差 DevRTT = (1 - beta) * DevRTT + beta * | SampleRTT - EstimatedRTT |
+
+beta的推荐值是0.25.
+
+#### 2 设置和管理重传超时间隔
+
+TimeoutInterval = EstimatedRTT + 4 * DevRTT
+
+推荐的初始TimeoutInterval值为1秒，出现超时后，会加倍，一旦更新EstimatedRTT, 又重新计算。
+
+### 3.5.4 可靠数据传输
+
+推荐的定时器管理过程仅使用单一的重传定时器。即时有多个已发送但未被确认的segment。
+
+处理三个事件：收到应用层的数据，收到ack，超时
+
+一些额外的话题：
++ 超时间隔加倍
++ 快速重传fast retransmit：接收方通过发送冗余ack，来通知发送方某个segment需要重传
++ GBN还是SR？TCP使用他们的混合体
+
+### 3.5.5 流量控制
+
+TCP为它的应用程序提供了流量控制服务 flow-control service, 以清除发送方使接收方缓存溢出的可能性。
+因此，流量控制是一个速度匹配服务，即发送方的发送速率与接收方应用的读取速率相匹配。
+
+TCP发送方也可能因为IP网络的拥塞而被遏制，这种形式的发送方的控制称为拥塞控制congestion control，它和流量控制是针对不同原因而采取的措施。
+
+发送方维护一个称为接收窗口receive window的变量，来进行流量控制。代表接收方还有多少接收缓存可用。
+
+![接收缓存和接收窗口](http://o9hjg7h8u.bkt.clouddn.com/%E6%8E%A5%E6%94%B6%E7%AA%97%E5%8F%A3%E5%92%8C%E6%8E%A5%E6%94%B6%E7%BC%93%E5%AD%98.png)
+
+### 3.5.6 连接管理
+
+![TCP三次握手](http://o9hjg7h8u.bkt.clouddn.com/TCP%E4%B8%89%E6%AC%A1%E6%8F%A1%E6%89%8Bsegment%E4%BA%A4%E6%8D%A2.png)
+
+参与一条TCP连接的两个进程中的任何一个都能终止该连接。
+
+![关闭一条TCP连接](http://o9hjg7h8u.bkt.clouddn.com/%E5%85%B3%E9%97%AD%E4%B8%80%E6%9D%A1TCP%E8%BF%9E%E6%8E%A5.png)
+
+SYN洪范攻击 SYN flood attack：攻击者发送SYN，服务器分配资源并响应SYNACK，如果客户端不发送ACK来完成第三次握手，通常在1分钟多后，资源将被回收。
+一种有效的防御是SYN cookie.
++ 服务端收到SYN时，不分配资源，此时根据源端口号和IP生成一个cookie，作为初始序列号放在SYNACK作为响应。服务器不存储该cookie的值
++ 如果客户合法，返回ACK，此ACK=cookie+1, 那么服务器此时分配资源
++ 如果客户端没有发送ack，那么服务器也不受其他损失。
+
+如果服务器不接受某个端口的TCP连接，那么会在响应RST segment；如果收到的是UDP数据，那么返回一段特殊的ICMP。
+
+例如，nmap向目标主机的某个端口发送一个特殊的TCP SYN segment，有三种可能的输出：
++ 收到源主机一个 TCP SYNACK segment，意味着该端口打开
++ 收到一个TCP RST segment，表示segment到达，但是端口不可用；segment没有被防火墙阻挡
++ 啥都没收到 无法到达目的主机
+
+
+## 3.6 拥塞控制原理
+
+
+
+
+
+
+
+
 
 
 

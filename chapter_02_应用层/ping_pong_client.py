@@ -15,7 +15,6 @@ import random
 def log(message):
     print '[{}] {}'.format(datetime.datetime.now().isoformat(), message)
 
-
 def time13():
     return int(1000*time.time())
 
