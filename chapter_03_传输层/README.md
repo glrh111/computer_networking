@@ -339,10 +339,54 @@ ABR提供三种机制用于从交换机向接收方发送与拥塞相关的指�
 + CI和NI比特。发送方到接收方的RM cell占比是一个可调参数，默认32个数据cell中有一个RM cell。
 + ER的设置。每个RM cell包含一个2byte的显式速率Explicit Rate， 一个拥塞的cell会降低经过的RM的ER。
 
-## 3.7 TCP拥塞控制
+## 3.7 TCP拥塞控制 RFC5681
 
 TCP所采用的方法，是让每一个发送方感知网络的拥塞程度，以调节发送速率，有三个问题：
 + 如何控制发送速率
 + 如何感知网络是否拥塞
-+ 
++ 怎样调整发送速率
+
+拥塞窗口congestion window cwnd, 有如下关系：LastByteSend - LastByteAcked <= min{rwnd, cwnd} , 其中rwnd为接收窗口。
+上述关系限制了发送方中未被确认的数据量。粗略地讲，发送方每次接收到ack后，可以发送cwnd个byte，那么传输速率是 cwnd/RTT byte/s
+
+定义丢包事件：超时，或者收到来自接收方的三个冗余ack。
+
+那么，如果ack以较慢的速度返回，那么cwnd以相当慢的速度增加；如果ack返回较快，那么cwnd增加也快。
+
+怎样确定发送速率，不致过快或者过慢？
++ 一个丢失的segment意味着拥塞，此时应该降低TCP发送速率
++ 一个ack到达时，能够增加发送方的速率
++ 带宽检测：ack到达时增加发送速率，直到出现丢包
+
+TCP拥塞控制算法 TCP congestion control algorithm : 慢启动，拥塞避免，快速恢复
+
+### 1 慢启动
+
+一条TCP连接开始时，cwnd通常初始置为一个MSS的较小值，如果MSS是500byte，RTT是200ms，那么初始速度只有20kbps.
+
+每接收到一个ack，cwnd增加一个MSS，那么每过一个RTT，发送速率都会翻倍。
+
+检测到丢包时，设定一个cwnd，并且TCP转移到拥塞避免模式。
+
+### 2 拥塞避免
+
+cwnd的值为上次遇到拥塞时的一半。之后，每个RTT，cwnd的值只增加一个MSS。
+
+### 3 快速恢复
+
+结合ssthresh，阈值以下指数增长，以上线性增长。
+
+没看明白在说啥。
+
+
+TCP拥塞控制，常被称为加性增，乘性减。AIMD。所以TCP发送速度曲线是一条锯齿。
+
+有多种拥塞控制算法，比如Reno，Vegas，CUBIC等，Linux支持多种。
+
+
+
+
+
+
+
 
