@@ -5,6 +5,9 @@ package main
 
 import (
 	"fmt"
+	"golang.org/x/net/icmp"
+	"golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv6"
 	"math"
 	"math/rand"
 	"net"
@@ -13,14 +16,11 @@ import (
 	"sync"
 	"syscall"
 	"time"
-	"golang.org/x/net/icmp"
-	"golang.org/x/net/ipv4"
-	"golang.org/x/net/ipv6"
 )
 
 const (
-	timeSliceLength = 8
-	protocolICMP = 1
+	timeSliceLength  = 8
+	protocolICMP     = 1
 	protocolIPv6ICMP = 58
 )
 
@@ -43,18 +43,18 @@ func NewPinger(addr string) (*Pinger, error) {
 	}
 
 	return &Pinger{
-		Interval: time.Second,
-		Timeout: time.Second * 100000, // 这个地方，如果用 10^6会有问题？什么原因，我曹
-		Count: -1,
-		Debug: false,
+		Interval:    time.Second,
+		Timeout:     time.Second * 100000, // 这个地方，如果用 10^6会有问题？什么原因，我曹
+		Count:       -1,
+		Debug:       false,
 		PacketsSent: 0,
 		PacketsRecv: 0,
-		done: make(chan bool),
-		ipaddr: ipaddr,
-		addr: addr,
-		ipv4: ipv4I,
-		network: "ip",
-		size: timeSliceLength,
+		done:        make(chan bool),
+		ipaddr:      ipaddr,
+		addr:        addr,
+		ipv4:        ipv4I,
+		network:     "ip",
+		size:        timeSliceLength,
 	}, nil
 }
 
@@ -93,17 +93,17 @@ type Pinger struct {
 
 	//
 	ipaddr *net.IPAddr
-	addr string
+	addr   string
 
-	ipv4 bool
-	source string
-	size int
+	ipv4     bool
+	source   string
+	size     int
 	sequence int
-	network string
+	network  string
 }
 
 type packet struct {
-	bytes []byte
+	bytes  []byte
 	nbytes int
 }
 
@@ -121,7 +121,6 @@ type Packet struct {
 	// Seq is the ICMP sequence number
 	Seq int
 }
-
 
 //
 type Statistics struct {
@@ -241,7 +240,7 @@ func (p *Pinger) run() {
 		case <-timeout.C:
 			close(p.done)
 			wg.Wait()
-			return 
+			return
 		case <-interval.C:
 			err = p.sendICMP(conn)
 			if err != nil {
@@ -253,15 +252,14 @@ func (p *Pinger) run() {
 				fmt.Println("FATAL: ", err.Error())
 			}
 		default:
-			if p.Count>0 && p.PacketsRecv>=p.Count {
+			if p.Count > 0 && p.PacketsRecv >= p.Count {
 				close(p.done)
 				wg.Wait()
 				return
 			}
-			
+
 		}
 	}
-
 
 }
 
@@ -281,7 +279,7 @@ func (p *Pinger) finish() {
 func (p *Pinger) Statistics() *Statistics {
 	loss := float64(p.PacketsSent-p.PacketsRecv) / float64(p.PacketsSent) * 100
 	var min, max, total time.Duration
-	if len(p.rtts)>0 {
+	if len(p.rtts) > 0 {
 		min = p.rtts[0]
 		max = p.rtts[0]
 	}
@@ -298,21 +296,21 @@ func (p *Pinger) Statistics() *Statistics {
 		PacketsRecv: p.PacketsRecv,
 		PacketsSent: p.PacketsSent,
 		PacketsLoss: loss,
-		IPAddr: p.ipaddr,
-		Addr: p.addr,
-		Rtts: p.rtts,
-		MinRtt: min,
-		MaxRtt: max,
-		TotalRtt: total,
+		IPAddr:      p.ipaddr,
+		Addr:        p.addr,
+		Rtts:        p.rtts,
+		MinRtt:      min,
+		MaxRtt:      max,
+		TotalRtt:    total,
 	}
-	if len(p.rtts)>0 {
+	if len(p.rtts) > 0 {
 		s.AvgRtt = total / time.Duration(len(p.rtts))
 		stdDevRtt := time.Duration(0)
 		for _, rtt := range p.rtts {
 			stdDevRtt += (rtt - s.AvgRtt) * (rtt - s.AvgRtt)
 		}
 		s.StdDevRtt = time.Duration(math.Sqrt(
-			float64(stdDevRtt/time.Duration(len(s.Rtts)))))
+			float64(stdDevRtt / time.Duration(len(s.Rtts)))))
 	}
 	return &s
 
@@ -320,7 +318,7 @@ func (p *Pinger) Statistics() *Statistics {
 
 func (p *Pinger) recvICMP(
 	conn *icmp.PacketConn,
-	recv chan <- *packet,
+	recv chan<- *packet,
 	wg *sync.WaitGroup,
 ) {
 	defer wg.Done()
@@ -343,7 +341,7 @@ func (p *Pinger) recvICMP(
 					}
 				}
 			}
-			recv <- &packet{bytes:bytes, nbytes: n}
+			recv <- &packet{bytes: bytes, nbytes: n}
 		}
 	}
 }
@@ -396,7 +394,6 @@ func (p *Pinger) processPacket(recv *packet) error {
 
 }
 
-
 func (p *Pinger) sendICMP(conn *icmp.PacketConn) error {
 	var typ icmp.Type
 	if p.ipv4 {
@@ -411,14 +408,14 @@ func (p *Pinger) sendICMP(conn *icmp.PacketConn) error {
 	}
 
 	t := timeToBytes(time.Now())
-	if p.size - timeSliceLength != 0 {
+	if p.size-timeSliceLength != 0 {
 		t = append(t, byteSliceOfSize(p.size-timeSliceLength)...)
 	}
 	bytes, err := (&icmp.Message{
 		Type: typ, Code: 0,
 		Body: &icmp.Echo{
-			ID: rand.Intn(65535),
-			Seq: p.sequence,
+			ID:   rand.Intn(65535),
+			Seq:  p.sequence,
 			Data: t,
 		},
 	}).Marshal(nil)
@@ -457,7 +454,7 @@ func (p *Pinger) listen(netProto string, source string) *icmp.PacketConn {
 
 func byteSliceOfSize(n int) []byte {
 	b := make([]byte, n)
-	for i:=0; i<n; i++ {
+	for i := 0; i < n; i++ {
 		b[i] = 1
 	}
 	return b
@@ -477,8 +474,8 @@ func ipv4Payload(b []byte) []byte {
 // 这个函数搞毛？
 func bytesToTime(b []byte) time.Time {
 	var nsec int64
-	for i:=uint8(0); i<8; i++ {
-		nsec += int64(b[i]) << ((7-i)*8)
+	for i := uint8(0); i < 8; i++ {
+		nsec += int64(b[i]) << ((7 - i) * 8)
 	}
 	return time.Unix(nsec/1000000000, nsec%1000000000)
 }
@@ -486,13 +483,11 @@ func bytesToTime(b []byte) time.Time {
 func timeToBytes(t time.Time) []byte {
 	nsec := t.UnixNano()
 	b := make([]byte, 8)
-	for i:=uint8(0); i<8; i++ {
-		b[i] = byte((nsec >> ((7-i)*8)) & 0xff)
+	for i := uint8(0); i < 8; i++ {
+		b[i] = byte((nsec >> ((7 - i) * 8)) & 0xff)
 	}
 	return b
 }
-
-
 
 func isIPv4(ip net.IP) bool {
 	return len(ip.To4()) == net.IPv4len
@@ -501,6 +496,3 @@ func isIPv4(ip net.IP) bool {
 func isIPv6(ip net.IP) bool {
 	return len(ip) == net.IPv6len
 }
-
-
-

@@ -34,5 +34,3 @@ func main() {
 		pinger.Addr(), pinger.IPAddr())
 	pinger.Run()
 }
-
-
