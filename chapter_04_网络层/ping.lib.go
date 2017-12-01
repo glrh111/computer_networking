@@ -3,7 +3,6 @@ package main
 // 参考 https://github.com/sparrc/go-ping/blob/master/ping.go
 // 参考 https://github.com/tatsushid/go-fastping/blob/master/fastping.go
 
-
 import (
 	"fmt"
 	"math"
@@ -31,7 +30,32 @@ var (
 )
 
 func NewPinger(addr string) (*Pinger, error) {
+	ipaddr, err := net.ResolveIPAddr("ip", addr)
+	if err != nil {
+		return nil, err
+	}
 
+	var ipv4I bool
+	if isIPv4(ipaddr.IP) {
+		ipv4I = true
+	} else if isIPv6(ipaddr.IP) {
+		ipv4I = false
+	}
+
+	return &Pinger{
+		Interval: time.Second,
+		Timeout: time.Second * 100000, // 这个地方，如果用 10^6会有问题？什么原因，我曹
+		Count: -1,
+		Debug: false,
+		PacketsSent: 0,
+		PacketsRecv: 0,
+		done: make(chan bool),
+		ipaddr: ipaddr,
+		addr: addr,
+		ipv4: ipv4I,
+		network: "ip",
+		size: timeSliceLength,
+	}, nil
 }
 
 // pinger
@@ -62,7 +86,7 @@ type Pinger struct {
 	OnRecv func(*Packet)
 
 	// OnFinish is called when pinger exits
-	OnFinish func(*statistics)
+	OnFinish func(*Statistics)
 
 	// stop chan bool
 	done chan bool
@@ -112,6 +136,8 @@ type Statistics struct {
 	Addr string
 
 	Rtts []time.Duration
+
+	TotalRtt time.Duration
 
 	MinRtt time.Duration
 
@@ -176,7 +202,64 @@ func (p *Pinger) Privileged() bool {
 func (p *Pinger) run() {
 	var conn *icmp.PacketConn
 	if p.ipv4 {
-		if conn = p.listen()
+		// network 可以是 ip, udp; ipv4Proto 返回 ip4:icmp, udp4; ip6:ipv6-icmp, udp6
+		if conn = p.listen(ipv4Proto[p.network], p.source); conn == nil {
+			return
+		}
+	} else {
+		if conn = p.listen(ipv6Proto[p.network], p.source); conn == nil {
+			return
+		}
+	}
+
+	defer conn.Close()
+	defer p.finish()
+
+	var wg sync.WaitGroup
+	recv := make(chan *packet, 5)
+	wg.Add(1)
+	go p.recvICMP(conn, recv, &wg)
+
+	err := p.sendICMP(conn)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	timeout := time.NewTicker(p.Timeout)
+	interval := time.NewTicker(p.Interval)
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	signal.Notify(c, syscall.SIGTERM)
+
+	for {
+		select {
+		case <-c:
+			close(p.done)
+		case <-p.done:
+			wg.Wait()
+			return
+		case <-timeout.C:
+			close(p.done)
+			wg.Wait()
+			return 
+		case <-interval.C:
+			err = p.sendICMP(conn)
+			if err != nil {
+				fmt.Println("FATAL: ", err.Error())
+			}
+		case r := <-recv:
+			err := p.processPacket(r)
+			if err != nil {
+				fmt.Println("FATAL: ", err.Error())
+			}
+		default:
+			if p.Count>0 && p.PacketsRecv>=p.Count {
+				close(p.done)
+				wg.Wait()
+				return
+			}
+			
+		}
 	}
 
 
@@ -185,6 +268,54 @@ func (p *Pinger) run() {
 // Run
 func (p *Pinger) Run() {
 	p.run()
+}
+
+func (p *Pinger) finish() {
+	handler := p.OnFinish
+	if handler != nil {
+		s := p.Statistics()
+		handler(s)
+	}
+}
+
+func (p *Pinger) Statistics() *Statistics {
+	loss := float64(p.PacketsSent-p.PacketsRecv) / float64(p.PacketsSent) * 100
+	var min, max, total time.Duration
+	if len(p.rtts)>0 {
+		min = p.rtts[0]
+		max = p.rtts[0]
+	}
+	for _, rtt := range p.rtts {
+		if min > rtt {
+			min = rtt
+		}
+		if max < rtt {
+			max = rtt
+		}
+		total += rtt
+	}
+	s := Statistics{
+		PacketsRecv: p.PacketsRecv,
+		PacketsSent: p.PacketsSent,
+		PacketsLoss: loss,
+		IPAddr: p.ipaddr,
+		Addr: p.addr,
+		Rtts: p.rtts,
+		MinRtt: min,
+		MaxRtt: max,
+		TotalRtt: total,
+	}
+	if len(p.rtts)>0 {
+		s.AvgRtt = total / time.Duration(len(p.rtts))
+		stdDevRtt := time.Duration(0)
+		for _, rtt := range p.rtts {
+			stdDevRtt += (rtt - s.AvgRtt) * (rtt - s.AvgRtt)
+		}
+		s.StdDevRtt = time.Duration(math.Sqrt(
+			float64(stdDevRtt/time.Duration(len(s.Rtts)))))
+	}
+	return &s
+
 }
 
 func (p *Pinger) recvICMP(
